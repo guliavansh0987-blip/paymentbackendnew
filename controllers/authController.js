@@ -24,6 +24,12 @@ const googleAuth = async (req, res) => {
       decodedToken = await getAuth().verifyIdToken(idToken);
     } catch (err) {
       logger.warn(`Invalid Firebase token: ${err.message}`);
+      if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_PRIVATE_KEY) {
+        return response.unauthorized(
+          res,
+          'Server configuration error: Firebase Admin credentials missing in Vercel. Please add FIREBASE_PROJECT_ID and FIREBASE_PRIVATE_KEY in Vercel Settings -> Environment Variables.'
+        );
+      }
       return response.unauthorized(res, 'Invalid or expired token. Please sign in again.');
     }
 
