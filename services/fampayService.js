@@ -1,5 +1,6 @@
 // services/fampayService.js
 const axios = require('axios');
+const https = require('https');
 const firebaseService = require('./firebaseService');
 const walletService = require('./walletService');
 const webhookService = require('./webhookService');
@@ -9,6 +10,7 @@ const logger = require('../utils/logger');
 const { ref } = require('../firebase/admin');
 const { DB_PATHS } = require('../config/constants');
 
+const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 const HISTORY_API_URL = 'https://zetpay.online/history.php';
 
 // history.php's date field is "datetime" (a formatted string like
@@ -39,7 +41,7 @@ const verifyPayment = async (orderId) => {
       email: user.fampay.email,
       pass: rawPassword,
       limit: 15
-    });
+    }, { httpsAgent, timeout: 15000 });
 
     // history.php's success flag is named "status", not "success" —
     // this check always rejected a genuinely successful response
@@ -224,7 +226,7 @@ async function checkUtrForOrder(orderId, identifier) {
       email: user.fampay.email,
       pass: rawPassword,
       limit: 20
-    });
+    }, { httpsAgent, timeout: 15000 });
     // Same field-name fix as verifyPayment above — history.php returns
     // "status", not "success".
     if (!response.data || !response.data.status) return false;

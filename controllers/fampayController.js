@@ -18,6 +18,8 @@
 // switching the active account here transparently changes what every one
 // of those existing routes uses, with zero changes needed there.
 const axios = require('axios');
+const https = require('https');
+const imap = require('imap-simple');
 const encryption = require('../utils/encryption');
 const response = require('../helpers/response');
 const firebaseService = require('../services/firebaseService');
@@ -27,6 +29,26 @@ const logger = require('../utils/logger');
 
 const HISTORY_API_URL = 'https://zetpay.online/history.php';
 const MAX_ACCOUNTS = 3;
+
+async function verifyGmailCredentials(email, password) {
+  const cleanPass = String(password || '').replace(/\s+/g, '');
+  const config = {
+    imap: {
+      user: email.trim(),
+      password: cleanPass,
+      host: 'imap.gmail.com',
+      port: 993,
+      tls: true,
+      authTimeout: 15000,
+      tlsOptions: { rejectUnauthorized: false }
+    }
+  };
+
+  const connection = await imap.connect(config);
+  await connection.openBox('INBOX');
+  connection.end();
+  return true;
+}
 
 // 4-digit numeric id, unique within this merchant's own account list —
 // short enough to read at a glance (matches the "440" / "2700" style ids
@@ -184,10 +206,15 @@ const verifyFampayAccount = async (req, res) => {
       return response.error(res, 'Account not found', 404);
     }
 
-    const apiRes = await axios.post(HISTORY_API_URL, { email, pass: password, limit: 1 });
-    if (!apiRes.data || !apiRes.data.status) {
-      const detail = (apiRes.data && (apiRes.data.error || apiRes.data.raw_error)) || 'IMAP Auth failed.';
-      return response.error(res, 'Invalid Email or App Password: ' + detail, 400);
+    try {
+      await verifyGmailCredentials(email, password);
+    } catch (imapErr) {
+      logger.warn(`FamPay Gmail verification failed for ${email}: ${imapErr.message}`);
+      let msg = imapErr.message || 'Invalid Email or App Password';
+      if (msg.toLowerCase().includes('authenticationfailed') || msg.toLowerCase().includes('invalid credentials')) {
+        msg = 'Invalid App Password. Please check your 16-character Google App Password.';
+      }
+      return response.error(res, 'Verification failed: ' + msg, 400);
     }
 
     const encryptedPassword = encryption.encrypt(password);
