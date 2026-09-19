@@ -1,4 +1,4 @@
-﻿// services/storeService.js - Store Portal data layer
+// services/storeService.js - Store Portal data layer
 //
 // Every merchant gets ONE store (auto-created on first touch of Store
 // Portal) holding: settings (name/logo/theme/social links) + an unlimited

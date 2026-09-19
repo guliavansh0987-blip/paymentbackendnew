@@ -1,4 +1,4 @@
-﻿// controllers/developerController.js - ZetAPI Developer Platform
+// controllers/developerController.js - ZetAPI Developer Platform
 const { body, validationResult } = require('express-validator');
 const { ref } = require('../firebase/admin');
 const { DB_PATHS } = require('../config/constants');

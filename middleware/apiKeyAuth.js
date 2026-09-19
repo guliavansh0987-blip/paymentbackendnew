@@ -1,4 +1,4 @@
-﻿// middleware/apiKeyAuth.js - ZetAPI Key Authentication Middleware
+// middleware/apiKeyAuth.js - ZetAPI Key Authentication Middleware
 //
 // Authenticates requests made by a MERCHANT'S OWN site/app/server using
 // their ZetPay-issued "ZetAPI" key (see services/apiTokenService.js).

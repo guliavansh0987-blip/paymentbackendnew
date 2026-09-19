@@ -1,4 +1,4 @@
-﻿// services/agentService.js
+// services/agentService.js
 // "Agentic Support" — in-app AI assistants scoped to ZetPay Gateway
 // questions only, powered by NVIDIA's hosted NIM API (OpenAI-compatible).
 // Two models are offered to the user, each with its own underlying model

@@ -1,4 +1,4 @@
-﻿// controllers/storePublicController.js - Store Portal (public, no auth)
+// controllers/storePublicController.js - Store Portal (public, no auth)
 const { ref } = require('../firebase/admin');
 const zapService = require('../services/zapService');
 const firebaseService = require('../services/firebaseService');

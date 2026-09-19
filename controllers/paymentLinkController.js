@@ -1,4 +1,4 @@
-﻿// controllers/paymentLinkController.js
+// controllers/paymentLinkController.js
 const { body, validationResult } = require('express-validator');
 const { ref } = require('../firebase/admin');
 const zapService = require('../services/zapService');

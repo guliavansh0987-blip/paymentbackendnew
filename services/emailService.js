@@ -1,4 +1,4 @@
-﻿// services/emailService.js
+// services/emailService.js
 // Sends transactional email (OTPs, etc.) through a cPanel mailbox via SMTP.
 //
 // Required env vars (set these in Vercel → Project → Settings → Environment

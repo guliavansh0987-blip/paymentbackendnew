@@ -1,4 +1,4 @@
-﻿// services/paytmService.js
+// services/paytmService.js
 //
 // Mirrors fampayService.js's verifyPayment shape, but for Paytm. FamPay
 // has no official merchant API, so its verifyPayment scrapes a connected

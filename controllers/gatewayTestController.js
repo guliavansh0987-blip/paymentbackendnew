@@ -1,4 +1,4 @@
-﻿// controllers/gatewayTestController.js - Gateway Test Mode simulator
+// controllers/gatewayTestController.js - Gateway Test Mode simulator
 //
 // Backs test.html. When a merchant has switched their account to Test
 // Mode, developerController.createOrder and paymentLinkController's

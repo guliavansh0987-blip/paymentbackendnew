@@ -1,4 +1,4 @@
-﻿// services/apiTokenService.js - ZetAPI Developer Token Management
+// services/apiTokenService.js - ZetAPI Developer Token Management
 //
 // Lets a ZetPay merchant accept payments on THEIR OWN website/app using a
 // token issued by ZetPay itself — a "ZetAPI" key — the same way ZetPay

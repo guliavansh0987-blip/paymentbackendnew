@@ -1,4 +1,4 @@
-﻿// controllers/fampayController.js
+// controllers/fampayController.js
 //
 // Multi-account FamPay Connect: a merchant can save up to 3 FamPay
 // accounts (each with its own phone/UPI ID/Gmail/app-password), see them

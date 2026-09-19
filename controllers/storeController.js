@@ -1,4 +1,4 @@
-﻿// controllers/storeController.js - Store Portal (merchant-facing, JWT auth)
+// controllers/storeController.js - Store Portal (merchant-facing, JWT auth)
 // Everything here is scoped to req.user.uid — a merchant can only ever
 // read/write their OWN store settings and products through these routes.
 // The public storefront (store.html) talks to storePublicController

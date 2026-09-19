@@ -1,4 +1,4 @@
-﻿// services/zapService.js - Zap UPI Gateway API Service
+// services/zapService.js - Zap UPI Gateway API Service
 // CRITICAL: This file must NEVER be exposed to frontend
 const axios = require('axios');
 const logger = require('../utils/logger');

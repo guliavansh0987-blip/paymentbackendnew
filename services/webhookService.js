@@ -1,4 +1,4 @@
-﻿// services/webhookService.js
+// services/webhookService.js
 // Lets a merchant register one or more of THEIR OWN server URLs to be
 // notified (via an outgoing POST) whenever one of their orders changes
 // status — "Order pending" (created) and "Order success/failed" (settled).

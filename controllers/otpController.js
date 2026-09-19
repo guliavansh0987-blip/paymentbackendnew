@@ -1,4 +1,4 @@
-﻿// controllers/otpController.js
+// controllers/otpController.js
 // Email OTP for two flows, both sharing the same generate/hash/verify core:
 //   1. Signup verification — POST /api/otp/send  { email, name?, purpose:'signup' }
 //                             POST /api/otp/verify { email, otp, purpose:'signup' }

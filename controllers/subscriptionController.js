@@ -1,4 +1,4 @@
-﻿// controllers/subscriptionController.js
+// controllers/subscriptionController.js
 const subscriptionService = require('../services/subscriptionService');
 const firebaseService     = require('../services/firebaseService');
 const walletService       = require('../services/walletService');

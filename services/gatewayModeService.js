@@ -1,4 +1,4 @@
-﻿// services/gatewayModeService.js - ZetPay Gateway Test Mode / Live Mode
+// services/gatewayModeService.js - ZetPay Gateway Test Mode / Live Mode
 //
 // A merchant can flip their account between LIVE (real Zap UPI Gateway, real
 // money) and TEST (simulated checkout via test.html, no real money ever

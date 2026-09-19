@@ -1,4 +1,4 @@
-﻿// routes/config.js
+// routes/config.js
 // Public endpoint — serves CLIENT-SAFE config (Firebase web config + site name)
 // from Vercel environment variables, so the frontend never needs to
 // hardcode these values. Firebase client config is designed to be public

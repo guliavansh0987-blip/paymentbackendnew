@@ -1,4 +1,4 @@
-﻿// controllers/paytmController.js
+// controllers/paytmController.js
 //
 // Multi-account Paytm Connect — same shape as the multi-account
 // fampayController.js: up to 3 saved accounts, 4-digit cashier ids,
