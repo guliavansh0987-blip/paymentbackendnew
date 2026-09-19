@@ -23,7 +23,7 @@ const allowedOrigins = (process.env.FRONTEND_URL || '')
 
 // Always allow standard origins
 allowedOrigins.push(
-  'https://panel.zetpay.online',
+  'https://app.zetpay.online',
   'https://zetpay.online',
   'http://localhost:3000',
   'http://localhost:3001',
