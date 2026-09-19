@@ -2,8 +2,7 @@
 const jwt = require('jsonwebtoken');
 const { ref } = require('../firebase/admin');
 const response = require('../helpers/response');
-const logger = require('../utils/logger');
-const JWT_SECRET = process.env.JWT_SECRET || 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949';
+const JWT_SECRET = (process.env.JWT_SECRET || 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949').replace(/["'\r\n]/g, '').trim();
 
 /**
  * Verify JWT token and attach user to request

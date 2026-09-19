@@ -71,11 +71,12 @@ const googleAuth = async (req, res) => {
     // Activity" can invalidate every outstanding token for this account at
     // once (bump the stored version; old tokens carry the old number and
     // stop verifying) without needing a device concept at all.
-    const jwtSecret = process.env.JWT_SECRET || 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949';
+    const jwtSecret = (process.env.JWT_SECRET || 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949').replace(/["'\r\n]/g, '').trim();
+    const expiresIn = String(process.env.JWT_EXPIRES_IN || '30d').replace(/["'\r\n]/g, '').trim() || '30d';
     const token = jwt.sign(
       { uid, email, role: user.role, tokenVersion: user.tokenVersion || 0 },
       jwtSecret,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
+      { expiresIn }
     );
 
     await firebaseService.logActivity(uid, 'LOGIN', {
