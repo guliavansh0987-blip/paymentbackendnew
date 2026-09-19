@@ -11,6 +11,7 @@ const { ref } = require('../firebase/admin');
 const { DB_PATHS } = require('../config/constants');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+const { fetchGmailTransactions } = require('./imapService');
 const HISTORY_API_URL = 'https://zetpay.online/history.php';
 
 // history.php's date field is "datetime" (a formatted string like
@@ -37,18 +38,26 @@ const verifyPayment = async (orderId) => {
     const rawPassword = encryption.decrypt(user.fampay.password);
     if (!rawPassword) return false;
 
-    const response = await axios.post(HISTORY_API_URL, {
-      email: user.fampay.email,
-      pass: rawPassword,
-      limit: 15
-    }, { httpsAgent, timeout: 15000 });
+    let transactions = [];
+    try {
+      transactions = await fetchGmailTransactions(user.fampay.email, rawPassword, 15);
+    } catch (imapErr) {
+      logger.warn(`Direct IMAP failed in verifyPayment, trying HTTP fallback: ${imapErr.message}`);
+      try {
+        const response = await axios.post(HISTORY_API_URL, {
+          email: user.fampay.email,
+          pass: rawPassword,
+          limit: 15
+        }, { httpsAgent, timeout: 15000 });
+        if (response.data && response.data.status) {
+          transactions = response.data.data || [];
+        }
+      } catch (httpErr) {
+        logger.error(`HTTP fallback also failed in verifyPayment: ${httpErr.message}`);
+      }
+    }
 
-    // history.php's success flag is named "status", not "success" —
-    // this check always rejected a genuinely successful response
-    // before ever reaching the transaction-matching loop below.
-    if (!response.data || !response.data.status) return false;
-
-    const transactions = response.data.data || [];
+    if (!transactions.length) return false;
     const paymentAmount = parseFloat(payment.amount);
     // payment.createdAt comes from Firebase's serverTimestamp() — by the
     // time this read happens it has resolved to a plain number
@@ -222,16 +231,26 @@ async function checkUtrForOrder(orderId, identifier) {
     const rawPassword = encryption.decrypt(user.fampay.password);
     if (!rawPassword) return false;
 
-    const response = await axios.post(HISTORY_API_URL, {
-      email: user.fampay.email,
-      pass: rawPassword,
-      limit: 20
-    }, { httpsAgent, timeout: 15000 });
-    // Same field-name fix as verifyPayment above — history.php returns
-    // "status", not "success".
-    if (!response.data || !response.data.status) return false;
+    let transactions = [];
+    try {
+      transactions = await fetchGmailTransactions(user.fampay.email, rawPassword, 20);
+    } catch (imapErr) {
+      logger.warn(`Direct IMAP failed in checkUtrForOrder, trying HTTP fallback: ${imapErr.message}`);
+      try {
+        const response = await axios.post(HISTORY_API_URL, {
+          email: user.fampay.email,
+          pass: rawPassword,
+          limit: 20
+        }, { httpsAgent, timeout: 15000 });
+        if (response.data && response.data.status) {
+          transactions = response.data.data || [];
+        }
+      } catch (httpErr) {
+        logger.error(`HTTP fallback also failed in checkUtrForOrder: ${httpErr.message}`);
+      }
+    }
 
-    const transactions = response.data.data || [];
+    if (!transactions.length) return false;
     const paymentAmount = parseFloat(payment.amount);
     const orderCreatedAt = typeof payment.createdAt === 'number' ? payment.createdAt : Date.parse(payment.createdAt) || 0;
     const identifierTrimmed = identifier.trim();
