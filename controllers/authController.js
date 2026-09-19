@@ -5,6 +5,21 @@ const firebaseService = require('../services/firebaseService');
 const response = require('../helpers/response');
 const logger = require('../utils/logger');
 
+function getSafeExpiresIn(val) {
+  if (!val) return '30d';
+  const clean = String(val).replace(/["'\r\n]/g, '').trim();
+  if (/^\d+$/.test(clean)) return parseInt(clean, 10);
+  if (/^\d+\s*(s|m|h|d|w|y)$/i.test(clean)) return clean;
+  return '30d';
+}
+
+function getSafeSecret(val, fallback) {
+  if (!val) return fallback;
+  let clean = String(val).replace(/["'\r\n]/g, '').trim();
+  if (clean.includes('=')) clean = clean.split('=').pop().trim();
+  return clean || fallback;
+}
+
 /**
  * POST /api/auth/google
  * Works for ALL Firebase auth methods:
@@ -71,8 +86,8 @@ const googleAuth = async (req, res) => {
     // Activity" can invalidate every outstanding token for this account at
     // once (bump the stored version; old tokens carry the old number and
     // stop verifying) without needing a device concept at all.
-    const jwtSecret = (process.env.JWT_SECRET || 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949').replace(/["'\r\n]/g, '').trim();
-    const expiresIn = String(process.env.JWT_EXPIRES_IN || '30d').replace(/["'\r\n]/g, '').trim() || '30d';
+    const jwtSecret = getSafeSecret(process.env.JWT_SECRET, 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949');
+    const expiresIn = getSafeExpiresIn(process.env.JWT_EXPIRES_IN);
     const token = jwt.sign(
       { uid, email, role: user.role, tokenVersion: user.tokenVersion || 0 },
       jwtSecret,
