@@ -50,11 +50,20 @@ function initializeFirebase() {
   }
 }
 
+// Auto-initialize on module load
+initializeFirebase();
+
 function getAuth() {
+  if (!initialized && admin.apps.length === 0) {
+    initializeFirebase();
+  }
   return admin.auth();
 }
 
 function getDatabase() {
+  if (!db) {
+    initializeFirebase();
+  }
   if (!db) {
     throw new Error('Firebase not initialized. Check environment variables in Vercel Dashboard.');
   }
