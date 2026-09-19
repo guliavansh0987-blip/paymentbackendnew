@@ -58,7 +58,7 @@ router.get('/', async (req, res) => {
     // → Cloud Messaging → Web configuration → Generate key pair). Optional
     // on purpose — everything else keeps working without it, push
     // notifications just won't be offered until it's set.
-    vapidKey: process.env.FCM_VAPID_KEY || '',
+    vapidKey: (process.env.FCM_VAPID_KEY || '').split('\n')[0].trim(),
     siteName: process.env.SITE_NAME || 'ZetPay',
     socialLinks,
     maintenanceMode,

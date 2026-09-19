@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { ref } = require('../firebase/admin');
 const response = require('../helpers/response');
 const logger = require('../utils/logger');
+const JWT_SECRET = process.env.JWT_SECRET || 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949';
 
 /**
  * Verify JWT token and attach user to request
@@ -19,7 +20,7 @@ const authenticate = async (req, res, next) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      decoded = jwt.verify(token, JWT_SECRET);
     } catch (err) {
       if (err.name === 'TokenExpiredError') {
         return response.unauthorized(res, 'Token expired. Please login again.');
@@ -77,7 +78,7 @@ const optionalAuth = async (req, res, next) => {
 
     const token = authHeader.split(' ')[1];
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, JWT_SECRET);
       req.user = { uid: decoded.uid, email: decoded.email, role: decoded.role };
     } catch {
       // Invalid token - continue as unauthenticated

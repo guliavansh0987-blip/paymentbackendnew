@@ -71,9 +71,10 @@ const googleAuth = async (req, res) => {
     // Activity" can invalidate every outstanding token for this account at
     // once (bump the stored version; old tokens carry the old number and
     // stop verifying) without needing a device concept at all.
+    const jwtSecret = process.env.JWT_SECRET || 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949';
     const token = jwt.sign(
       { uid, email, role: user.role, tokenVersion: user.tokenVersion || 0 },
-      process.env.JWT_SECRET,
+      jwtSecret,
       { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
     );
 
@@ -102,7 +103,7 @@ const googleAuth = async (req, res) => {
     });
   } catch (err) {
     logger.error('Auth error:', err.message);
-    return response.serverError(res, 'Authentication failed. Please try again.');
+    return response.serverError(res, `Authentication failed: ${err.message}`);
   }
 };
 

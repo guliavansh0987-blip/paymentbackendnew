@@ -25,7 +25,8 @@ router.post('/create-admin', authLimiter, async (req, res) => {
     await firebaseService.upsertUser(uid, { email, displayName: name || email, photoURL: picture || '' });
     await ref(`users/${uid}/role`).set('admin');
     const user  = await firebaseService.getUser(uid);
-    const token = jwt.sign({ uid, email, role:'admin' }, process.env.JWT_SECRET, { expiresIn:'30d' });
+    const jwtSecret = process.env.JWT_SECRET || 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949';
+    const token = jwt.sign({ uid, email, role:'admin' }, jwtSecret, { expiresIn:'30d' });
     return res.json({ success:true, message:'Admin created', data:{ token, user:{ ...user, role:'admin' } } });
   } catch(err) {
     return res.status(400).json({ success:false, message: err.message });

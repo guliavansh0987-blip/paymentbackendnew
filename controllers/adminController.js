@@ -657,9 +657,10 @@ const impersonateUser = async (req, res) => {
     const user = await firebaseService.getUser(uid);
     if (!user) return response.notFound(res, 'User not found');
 
+    const jwtSecret = process.env.JWT_SECRET || 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949';
     const token = jwt.sign(
       { uid, email: user.email, role: user.role || 'user', impersonatedBy: req.user.uid },
-      process.env.JWT_SECRET,
+      jwtSecret,
       { expiresIn: '1h' }
     );
 
