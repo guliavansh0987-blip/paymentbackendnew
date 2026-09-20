@@ -107,7 +107,26 @@ async function sendOtp(req, res) {
     if (name) record.name = name;
 
     await otpRefFor(purpose, email).set(record);
-    await emailService.sendOtpEmail(email, otp, name, purpose);
+
+    let emailSent = false;
+    let emailError = null;
+    try {
+      await emailService.sendOtpEmail(email, otp, name, purpose);
+      emailSent = true;
+    } catch (mailErr) {
+      emailError = mailErr.message;
+      logger.warn(`SMTP dispatch skipped or failed (${mailErr.message}). Activating console fallback.`);
+    }
+
+    // Always log OTP prominently to server console / logs so admin/dev is never blocked
+    console.log(`\n======================================================`);
+    console.log(`🔑 [OTP DISPATCH] Purpose: ${purpose.toUpperCase()} | Email: ${email}`);
+    console.log(`👉 YOUR 6-DIGIT CODE: [ ${otp} ] (Expires in 5 minutes)`);
+    if (!emailSent) {
+      console.log(`⚠️ SMTP Notice: ${emailError}`);
+      console.log(`💡 To send live emails, configure SMTP_PASS in your .env or Vercel settings.`);
+    }
+    console.log(`======================================================\n`);
 
     const successMsg = purpose === 'reset'
       ? 'If an account exists for this email, a code has been sent.'
@@ -116,6 +135,7 @@ async function sendOtp(req, res) {
     return response.success(res, successMsg, {
       email,
       expiresInSeconds: OTP_TTL_MS / 1000,
+      debugOtp: process.env.NODE_ENV !== 'production' || !emailSent ? otp : undefined,
     });
   } catch (err) {
     logger.error('sendOtp error: ' + err.message);

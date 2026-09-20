@@ -281,7 +281,15 @@ const initiatePayment = async (req, res) => {
       let checkoutUrl = `https://zetpay.online/checkout.html?order_id=${orderId}&amount=${link.amount}&upi=${encodeURIComponent(merchantUser.fampay.upiId)}&redirect_url=${encodeURIComponent(safeRedirect)}`;
       checkoutUrl += `&theme=${encodeURIComponent(merchantUser?.checkoutTheme || 'default')}`;
       if (merchantUser?.checkoutThemeColor) checkoutUrl += `&color=${encodeURIComponent(merchantUser.checkoutThemeColor)}`;
-      return response.success(res, 'Payment initiated via Cashier', { paymentUrl: checkoutUrl, orderId, amount: link.amount, isTest: false, method: 'cashier' });
+      return response.success(res, 'Payment initiated via Cashier', {
+        paymentUrl: checkoutUrl,
+        orderId,
+        amount: link.amount,
+        isTest: false,
+        method: 'cashier',
+        upiId: merchantUser.fampay.upiId,
+        merchantName: link.merchantName,
+      });
     }
 
     let isSystemCashier = false;
@@ -307,7 +315,15 @@ const initiatePayment = async (req, res) => {
       let checkoutUrl = `https://zetpay.online/checkout.html?order_id=${orderId}&amount=${link.amount}&upi=${encodeURIComponent(sysAdminUser.fampay.upiId)}&redirect_url=${encodeURIComponent(safeRedirect)}`;
       checkoutUrl += `&theme=${encodeURIComponent(merchantUser?.checkoutTheme || 'default')}`;
       if (merchantUser?.checkoutThemeColor) checkoutUrl += `&color=${encodeURIComponent(merchantUser.checkoutThemeColor)}`;
-      return response.success(res, 'Payment initiated via System Cashier', { paymentUrl: checkoutUrl, orderId, amount: link.amount, isTest: false, method: 'system_cashier' });
+      return response.success(res, 'Payment initiated via System Cashier', {
+        paymentUrl: checkoutUrl,
+        orderId,
+        amount: link.amount,
+        isTest: false,
+        method: 'system_cashier',
+        upiId: sysAdminUser.fampay.upiId,
+        merchantName: link.merchantName,
+      });
     } else {
       // NOTE: previously there was an `else if (isFamPay)` branch here that
       // forced ANY merchant with FamPay connected through the cashier
@@ -328,7 +344,15 @@ const initiatePayment = async (req, res) => {
           timeoutUrl: `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=timeout`,
         }),
       });
-      return response.success(res, 'Payment initiated', { paymentUrl: zapOrder.paymentUrl, orderId, amount: link.amount, isTest: false, method: 'zapupi' });
+      return response.success(res, 'Payment initiated', {
+        paymentUrl: zapOrder.paymentUrl,
+        orderId,
+        amount: link.amount,
+        isTest: false,
+        method: 'zapupi',
+        upiId: merchantUser?.fampay?.isConnected ? merchantUser.fampay.upiId : null,
+        merchantName: link.merchantName,
+      });
     }
   } catch (err) {
     logger.error('Initiate link payment error:', err.message);
@@ -346,14 +370,17 @@ const getLinkOrderStatus = async (req, res) => {
     // this same endpoint regardless of which of these created the order.
     if (!payment) return response.notFound(res, 'Order not found');
 
-    if (payment.status === 'pending' && (payment.paymentMethod === 'fampay' || payment.routingEngine === 'cashier' || payment.routingEngine === 'system_cashier')) {
+    if (payment.status === 'pending' && (payment.paymentMethod === 'fampay' || payment.routingEngine === 'cashier' || payment.routingEngine === 'system_cashier' || payment.routingEngine === 'wallet')) {
       const fampayService = require('../services/fampayService');
       await fampayService.verifyPayment(orderId);
       const updatedPayment = await firebaseService.getPayment(orderId);
-      if (updatedPayment) payment.status = updatedPayment.status;
+      if (updatedPayment) {
+        payment.status = updatedPayment.status;
+        payment.utr = updatedPayment.utr || updatedPayment.txnId;
+      }
     }
 
-    return response.success(res, 'Status fetched', { orderId, status: payment.status, linkId: payment.linkId || null });
+    return response.success(res, 'Status fetched', { orderId, status: payment.status, linkId: payment.linkId || null, utr: payment.utr || null });
   } catch (err) {
     logger.error('Get link order status error:', err.message);
     return response.serverError(res, err.message);

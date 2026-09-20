@@ -35,6 +35,9 @@ function getTransporter() {
     port: Number(SMTP_PORT),
     secure: String(process.env.SMTP_SECURE || 'true') === 'true', // true for 465, false for 587
     auth: { user: SMTP_USER, pass: SMTP_PASS },
+    connectionTimeout: 10000, // 10s connection timeout
+    greetingTimeout: 10000,   // 10s greeting timeout
+    socketTimeout: 15000,     // 15s socket timeout
   });
 
   return transporter;
