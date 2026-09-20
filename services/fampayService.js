@@ -23,7 +23,9 @@ function parseTxnDatetime(str) {
     const m = str.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
     if (!m) return null;
     const [, dd, mm, yyyy, hh, min, ss] = m;
-    return new Date(`${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}`).getTime();
+    // Email timestamps from Indian banking/UPI (FamPay) are in Indian Standard Time (IST: UTC+05:30).
+    // Specifying +05:30 ensures UTC servers (like Vercel) parse the exact millisecond timestamp without skew.
+    return new Date(`${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}+05:30`).getTime();
 }
 
 const verifyPayment = async (orderId) => {
@@ -59,11 +61,6 @@ const verifyPayment = async (orderId) => {
 
     if (!transactions.length) return false;
     const paymentAmount = parseFloat(payment.amount);
-    // payment.createdAt comes from Firebase's serverTimestamp() — by the
-    // time this read happens it has resolved to a plain number
-    // (milliseconds since epoch), but guard against any non-numeric
-    // shape rather than letting a broken comparison silently reject
-    // every transaction.
     const orderCreatedAt = typeof payment.createdAt === 'number' ? payment.createdAt : Date.parse(payment.createdAt) || 0;
 
     for (const txn of transactions) {
@@ -71,39 +68,37 @@ const verifyPayment = async (orderId) => {
       const txnTime = parseTxnDatetime(txn.datetime);
       if (txnTime === null || txnAmount !== paymentAmount) continue;
 
-      // Matching on amount alone was unsafe: any other ₹X payment (any
-      // order, any time within the old 60s-before window) could wrongly
-      // confirm THIS order. Two independent checks now gate a match:
-      //   1. Timing — the email must be from AFTER this order was
-      //      created (a small forward buffer only, for clock skew
-      //      between this server and the mail server — never backward,
-      //      since a payment can't confirm an order that didn't exist
-      //      yet).
-      //   2. Not already claimed — this exact UTR/txn hasn't already
-      //      been recorded against a DIFFERENT order (checked before
-      //      the match is accepted, closing the race where two orders
-      //      of the same amount are pending close together).
-      // purpose (FamX's own payment-note field, when present) is
-      // checked separately below as an extra positive signal, but its
-      // absence doesn't block a match — many transfer types never
-      // populate it.
+      // 1. Timing: transaction must occur AFTER the order was created
       const CLOCK_SKEW_BUFFER_MS = 5000;
       if (txnTime < orderCreatedAt - CLOCK_SKEW_BUFFER_MS) continue;
 
-      const txnIdentifier = (txn.utr && txn.utr !== 'NA') ? txn.utr : txn.txn_id;
-      if (txnIdentifier) {
-        const existingCheck = await firebaseService.getPaymentByUtr(txnIdentifier);
-        if (existingCheck && existingCheck.orderId !== orderId) continue;
+      // 2. Claim check: neither UTR nor txnId can already belong to a DIFFERENT order
+      if (txn.utr && txn.utr !== 'NA') {
+        const existingUtr = await firebaseService.getPaymentByUtr(txn.utr);
+        if (existingUtr && existingUtr.orderId !== orderId) continue;
+      }
+      if (txn.txn_id && txn.txn_id !== 'NA') {
+        const existingTxn = await firebaseService.getPaymentByTxnId(txn.txn_id);
+        if (existingTxn && existingTxn.orderId !== orderId) continue;
       }
 
-      // Extra positive signal when available: FamX often echoes its own
-      // "ZP<orderId>"-style reference in the payment note. Not required
-      // (FamPay-to-FamPay transfers frequently have no purpose text at
-      // all) — but if purpose IS present and does NOT contain this
-      // order's id, that's a strong sign the email belongs to a
-      // different order, so it's rejected rather than trusted on amount
-      // + timing alone.
-      if (txn.purpose && txn.purpose !== 'NA' && !txn.purpose.includes(orderId)) continue;
+      // 3. Mandatory Order ID check:
+      // The UPI QR code sets tn=ZPP<orderId>. The transaction note / purpose / raw text
+      // must contain this distinct order ID. If it does not contain the order ID, it must wait!
+      const targetOrderId = orderId.toLowerCase();
+      const zppTarget = `zpp${targetOrderId}`;
+
+      const purposeStr = String(txn.purpose || '').toLowerCase();
+      const rawStr = String(txn.rawText || txn.raw_text || '').toLowerCase();
+
+      const hasOrderId = (txn.purpose && txn.purpose !== 'NA' && (purposeStr.includes(targetOrderId) || purposeStr.includes(zppTarget))) ||
+                         rawStr.includes(targetOrderId) ||
+                         rawStr.includes(zppTarget);
+
+      if (!hasOrderId) {
+        // Without this visitor's distinct order ID, do not confirm; wait for the actual payment!
+        continue;
+      }
 
       logger.info(`FamPay Match Found for Order ${orderId}! UTR: ${txn.utr}`);
 

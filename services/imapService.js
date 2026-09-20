@@ -97,6 +97,9 @@ async function fetchGmailTransactions(email, password, limit = 15) {
       const timeMatch = body.match(/at\s+(\d{1,2}:\d{2}\s*[AP]M\s*IST,?\s*\d{1,2}\s+\w+\s+\d{4})/i);
       if (timeMatch) txn_time = timeMatch[1].trim();
 
+      const purposeMatch = body.match(/(?:Purpose|Note|Remark|Description|Comments?)[:\s]+(.+?)(?:\.|\r|\n|$)/im);
+      if (purposeMatch) purpose = purposeMatch[1].trim();
+
       let finalDatetime = 'NA';
       if (txn_time) {
         const dt = new Date(txn_time.replace(/IST/i, '').trim());
@@ -113,6 +116,7 @@ async function fetchGmailTransactions(email, password, limit = 15) {
         datetime: finalDatetime,
         amount: amount || 0,
         purpose: purpose,
+        rawText: `${subject} ${body} ${mail.html || ''}`,
         txn_id: txn_id !== 'NA' ? txn_id : String(item.attributes.uid)
       });
     } catch (parseErr) {
