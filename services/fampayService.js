@@ -134,20 +134,16 @@ const verifyPayment = async (orderId) => {
         const subSnap = await ref(`${DB_PATHS.USER_SUBSCRIPTIONS}/${payment.userId}`).once('value');
         const plan = subSnap.val()?.plan || { walletLimit: 500 };
 
-        if (payment.routingEngine === 'cashier') {
-          logger.info(`Order ${orderId}: genuine cashier routing — money already in merchant's own FamPay, skipping Zap Cash credit.`);
-        } else {
-          try {
-            const balance = await walletService.getBalance(payment.userId);
-            const available = plan.walletLimit - balance;
+        try {
+          const balance = await walletService.getBalance(payment.userId);
+          const available = plan.walletLimit - balance;
 
-            const credit = Math.min(txnAmount, available);
-            if (credit > 0) {
-              await walletService.creditWallet(payment.userId, credit, `Order ${orderId}`);
-            }
-          } catch (e) {
-            logger.error(`Error crediting wallet for ${payment.routingEngine}: ${e.message}`);
+          const credit = Math.min(txnAmount, available);
+          if (credit > 0) {
+            await walletService.creditWallet(payment.userId, credit, `Order ${orderId}`);
           }
+        } catch (e) {
+          logger.error(`Error crediting wallet for order ${orderId}: ${e.message}`);
         }
 
         // ─── Zap Credit deduction (unconditional) ─────────────────────

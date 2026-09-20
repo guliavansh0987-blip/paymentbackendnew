@@ -174,6 +174,7 @@ const getLinkPublic = async (req, res) => {
       linkId: link.id, merchantName: link.merchantName, title: link.title, description: link.description,
       amount: link.amount, expiresAt: link.expiresAt, status: link.status, redirectUrl: link.redirectUrl || '',
       checkoutTheme: merchant.checkoutTheme || 'default', checkoutThemeColor: merchant.checkoutThemeColor || '',
+      merchantPhoto: merchant.photoURL || null,
       fampayConnected: !!merchant.fampay?.isConnected, fampayUpiId: merchant.fampay?.isConnected ? merchant.fampay.upiId : null,
       routingEngine: link.routingEngine || 'wallet',
     });

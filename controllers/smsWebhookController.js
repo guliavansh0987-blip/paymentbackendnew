@@ -68,11 +68,9 @@ const processIncomingSms = async (req, res) => {
     const balance = await walletService.getBalance(targetOrder.userId);
     const available = plan.walletLimit - balance;
 
-    if (targetOrder.routingEngine !== 'cashier' && targetOrder.routingEngine !== 'system_cashier') {
-      const credit = Math.min(targetOrder.amount, available);
-      if (credit > 0) {
-        await walletService.creditWallet(targetOrder.userId, credit, `Online Gateway Order ${orderId}`);
-      }
+    const credit = Math.min(targetOrder.amount, available);
+    if (credit > 0) {
+      await walletService.creditWallet(targetOrder.userId, credit, `Online Gateway Order ${orderId}`);
     }
 
     const commissionPct = targetOrder.commissionPercent ?? plan.commissionPercent ?? 5;
@@ -148,11 +146,9 @@ const verifyManualUtr = async (req, res) => {
     const balance = await walletService.getBalance(targetOrder.userId);
     const available = plan.walletLimit - balance;
     
-    if (targetOrder.routingEngine !== 'cashier' && targetOrder.routingEngine !== 'system_cashier') {
-      const credit = Math.min(targetOrder.amount, available);
-      if (credit > 0) {
-        await walletService.creditWallet(targetOrder.userId, credit, `Manual Verify Order ${orderId}`);
-      }
+    const credit = Math.min(targetOrder.amount, available);
+    if (credit > 0) {
+      await walletService.creditWallet(targetOrder.userId, credit, `Manual Verify Order ${orderId}`);
     }
 
     const commissionPct = targetOrder.commissionPercent ?? plan.commissionPercent ?? 5;
@@ -234,11 +230,9 @@ const confirmCheckoutPaid = async (req, res) => {
     const balance = await walletService.getBalance(targetOrder.userId);
     const available = plan.walletLimit - balance;
 
-    if (targetOrder.routingEngine !== 'cashier' && targetOrder.routingEngine !== 'system_cashier') {
-      const credit = Math.min(targetOrder.amount, available);
-      if (credit > 0) {
-        await walletService.creditWallet(targetOrder.userId, credit, `Checkout Confirmed Order ${orderId}`);
-      }
+    const credit = Math.min(targetOrder.amount, available);
+    if (credit > 0) {
+      await walletService.creditWallet(targetOrder.userId, credit, `Checkout Confirmed Order ${orderId}`);
     }
 
     const commissionPct = targetOrder.commissionPercent ?? plan.commissionPercent ?? 5;
