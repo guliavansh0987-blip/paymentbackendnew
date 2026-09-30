@@ -22,7 +22,7 @@ const logger = require('../utils/logger');
 
 const authenticateApiKey = async (req, res, next) => {
   try {
-    const apiKey = (req.body && req.body.zap_api) || req.headers['x-zapapi-key'];
+    const apiKey = (req.body && req.body.zap_api) || req.headers['x-zapapi-key'] || req.headers['x-zetapi-key'] || req.headers['x-api-key'] || (req.query && (req.query.zap_api || req.query.api_key));
 
     if (!apiKey) {
       return response.unauthorized(

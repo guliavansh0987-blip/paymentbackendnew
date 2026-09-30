@@ -44,7 +44,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-token', 'x-api-key']
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-token', 'x-api-key', 'x-zapapi-key', 'x-zetapi-key', 'zap_api']
   })
 );
 
@@ -113,6 +113,14 @@ if (process.env.VERCEL !== '1' && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
     console.log(`🚀 ZetPay Backend listening on http://localhost:${PORT}`);
   });
 }
+
+// Global process error safety to keep server alive
+process.on('uncaughtException', (err) => {
+  logger.error(`Uncaught Exception caught: ${err.message}`, { stack: err.stack });
+});
+process.on('unhandledRejection', (reason) => {
+  logger.error(`Unhandled Rejection caught: ${reason}`);
+});
 
 // Export for cPanel Passenger and Vercel Serverless
 module.exports = app;

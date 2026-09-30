@@ -102,13 +102,32 @@ const verifyManualUtr = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Valid Order ID and UTR/Txn ID are required' });
     }
 
-    const orderSnap = await ref(`${DB_PATHS.PAYMENTS}/${orderId}`).once('value');
+    let targetOrderId = orderId.trim();
+    let orderSnap = await ref(`${DB_PATHS.PAYMENTS}/${targetOrderId}`).once('value');
+    if (!orderSnap.exists()) {
+      if (targetOrderId.startsWith('ZPP') || targetOrderId.startsWith('zpp')) {
+        const altId = targetOrderId.substring(3);
+        const altSnap = await ref(`${DB_PATHS.PAYMENTS}/${altId}`).once('value');
+        if (altSnap.exists()) {
+          targetOrderId = altId;
+          orderSnap = altSnap;
+        }
+      } else {
+        const altId = 'ZPP' + targetOrderId;
+        const altSnap = await ref(`${DB_PATHS.PAYMENTS}/${altId}`).once('value');
+        if (altSnap.exists()) {
+          targetOrderId = altId;
+          orderSnap = altSnap;
+        }
+      }
+    }
+
     if (!orderSnap.exists()) {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
     const targetOrder = orderSnap.val();
-    if (targetOrder.status === 'success') {
+    if (targetOrder.status?.toLowerCase() === 'success') {
       return res.status(200).json({ success: true, message: 'Already verified' });
     }
 
@@ -120,22 +139,28 @@ const verifyManualUtr = async (req, res) => {
       let used = false;
       allPaymentsSnap.forEach(child => {
         const p = child.val();
-        if (p.status === 'success' && p.utr === utr.trim()) used = true;
+        if (p.status?.toLowerCase() === 'success' && p.utr === utr.trim() && child.key !== targetOrderId) used = true;
       });
       if (used) {
         return res.status(400).json({ success: false, message: 'This UTR/Txn ID has already been used for another order.' });
       }
     }
 
-    const verified = await fampayService.checkUtrForOrder(orderId, utr.trim());
+    let verified = false;
+    if (targetOrder.paytmTxnRef || targetOrder.routingEngine === 'paytm_cashier' || targetOrder.paymentMethod === 'paytm') {
+      const paytmService = require('../services/paytmService');
+      verified = await paytmService.verifyPayment(targetOrderId);
+    } else {
+      verified = await fampayService.checkUtrForOrder(targetOrderId, utr.trim());
+    }
 
     if (!verified) {
       return res.status(400).json({ success: false, message: 'Payment not found with this UTR/Txn ID. Please check and try again.' });
     }
 
-    await firebaseService.markOrderProcessed(orderId, 'Success');
-    await firebaseService.updatePaymentStatus(orderId, { 
-      status: 'Success', 
+    await firebaseService.markOrderProcessed(targetOrderId, 'Success');
+    await firebaseService.updatePaymentStatus(targetOrderId, { 
+      status: 'success', 
       txn_id: utr.trim(), 
       utr: utr.trim(),
       environment: 'manual_fallback'

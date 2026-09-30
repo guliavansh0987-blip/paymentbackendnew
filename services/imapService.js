@@ -21,11 +21,15 @@ async function verifyGmailCredentials(email, password) {
       port: 993,
       tls: true,
       authTimeout: 15000,
-      tlsOptions: { rejectUnauthorized: false }
+      connTimeout: 15000,
+      tlsOptions: { rejectUnauthorized: false, servername: 'imap.gmail.com' }
     }
   };
 
   const connection = await imap.connect(config);
+  connection.on('error', (err) => {
+    logger.warn(`IMAP connection error: ${err.message}`);
+  });
   await connection.openBox('INBOX');
   connection.end();
   return true;
@@ -34,7 +38,7 @@ async function verifyGmailCredentials(email, password) {
 /**
  * Fetch and parse recent transactions directly from Gmail INBOX
  */
-async function fetchGmailTransactions(email, password, limit = 15) {
+async function fetchGmailTransactions(email, password, limit = 5) {
   const cleanPass = String(password || '').replace(/\s+/g, '');
   const config = {
     imap: {
@@ -43,17 +47,21 @@ async function fetchGmailTransactions(email, password, limit = 15) {
       host: 'imap.gmail.com',
       port: 993,
       tls: true,
-      authTimeout: 15000,
-      tlsOptions: { rejectUnauthorized: false }
+      authTimeout: 8000,
+      connTimeout: 8000,
+      tlsOptions: { rejectUnauthorized: false, servername: 'imap.gmail.com' }
     }
   };
 
   const connection = await imap.connect(config);
+  connection.on('error', (err) => {
+    logger.warn(`IMAP fetch connection error: ${err.message}`);
+  });
   const box = await connection.openBox('INBOX');
   const total = box.messages?.total || 0;
 
   if (total === 0) {
-    connection.end();
+    try { connection.end(); } catch (e) {}
     return [];
   }
 
@@ -91,8 +99,14 @@ async function fetchGmailTransactions(email, password, limit = 15) {
       const txnIdMatch = body.match(/transaction\s+id\s+([A-Z0-9]+)/i);
       if (txnIdMatch) txn_id = txnIdMatch[1];
 
-      const utrMatch = body.match(/UTR[:\s]+(\d+)/i);
-      if (utrMatch) utr = utrMatch[1];
+      const utrMatch = body.match(/UTR[:\s]+(\d+)/i) || 
+                       body.match(/(?:rrn|reference\s*(?:no|number)?)[:\s]+(\d+)/i) ||
+                       body.match(/upi\s*ref(?:erence)?\s*(?:no|num)?[:\s]+(\d+)/i);
+      if (utrMatch) {
+        utr = utrMatch[1];
+      } else if (txn_id !== 'NA') {
+        utr = txn_id;
+      }
 
       const timeMatch = body.match(/at\s+(\d{1,2}:\d{2}\s*[AP]M\s*IST,?\s*\d{1,2}\s+\w+\s+\d{4})/i);
       if (timeMatch) txn_time = timeMatch[1].trim();
@@ -101,12 +115,11 @@ async function fetchGmailTransactions(email, password, limit = 15) {
       if (purposeMatch) purpose = purposeMatch[1].trim();
 
       let finalDatetime = 'NA';
-      if (txn_time) {
-        const dt = new Date(txn_time.replace(/IST/i, '').trim());
-        if (!isNaN(dt.getTime())) finalDatetime = formatDate(dt);
-      }
-      if (finalDatetime === 'NA' && dateFallback) {
+      if (dateFallback) {
         const dt = new Date(dateFallback);
+        if (!isNaN(dt.getTime())) finalDatetime = formatDate(dt);
+      } else if (txn_time) {
+        const dt = new Date(txn_time.replace(/IST/i, '').trim());
         if (!isNaN(dt.getTime())) finalDatetime = formatDate(dt);
       }
 

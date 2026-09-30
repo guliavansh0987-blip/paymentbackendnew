@@ -7,7 +7,8 @@ const response = require('../helpers/response');
  */
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
+  max: 1000,
+  skip: (req) => req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1',
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
@@ -81,7 +82,7 @@ const apiKeyLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.body && req.body.zap_api) || req.headers['x-zapapi-key'] || req.ip,
+  keyGenerator: (req) => (req.body && req.body.zap_api) || req.headers['x-zapapi-key'] || req.headers['x-zetapi-key'] || req.headers['x-api-key'] || req.ip,
   handler: (req, res) => {
     return response.error(res, 'Too many API requests. Please try again later.', 429);
   },

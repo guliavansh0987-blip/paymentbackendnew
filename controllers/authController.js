@@ -54,6 +54,16 @@ const googleAuth = async (req, res) => {
     const settings = await firebaseService.getSettings();
     const existingUser = await firebaseService.getUser(uid);
 
+    // If logging in from the Admin Portal (requireAdmin: true):
+    // Only existing users who already have role === 'admin' are permitted to log in.
+    // No new account can be created and no non-admin can access or register.
+    if (req.body.requireAdmin) {
+      if (!existingUser || existingUser.role !== 'admin') {
+        logger.warn(`Non-admin attempted to login via admin portal: ${email} (UID: ${uid})`);
+        return response.forbidden(res, 'Access denied. Only existing admin accounts can log in to this panel.');
+      }
+    }
+
     // Banned users are still allowed to log in — the frontend shows them a
     // dedicated suspended screen (with the reason + a support chat) instead
     // of the dashboard. Every other endpoint stays off-limits to them via

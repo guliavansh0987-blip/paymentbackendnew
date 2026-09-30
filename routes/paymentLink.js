@@ -8,6 +8,7 @@ const { paymentLimiter } = require('../middleware/rateLimiter');
 // Public
 router.get('/:linkId/public', ctrl.getLinkPublic);
 router.get('/order/:orderId/status', ctrl.getLinkOrderStatus);
+router.post('/quick-initiate', paymentLimiter, ctrl.quickInitiatePayment);
 router.post('/:linkId/initiate', paymentLimiter, ctrl.initiatePayment);
 
 // Authenticated (merchant)

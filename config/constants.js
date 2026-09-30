@@ -36,7 +36,7 @@ const DEFAULT_SETTINGS = {
   referralCommissionPercent: 30,
   referralQualifyingMinDeposit: 100,
   signupBonus: 100,
-  signupZapCredit: 50,
+  signupZapCredit: 10,
   siteName: 'ZetPay',
   socialLinks: {
     instagram: {
@@ -226,7 +226,7 @@ const SUBSCRIPTION_DURATIONS = [
   { months: 12, discountPercent: 25, label: '12 Months (25% OFF)' }
 ];
 
-const ZAP_CREDIT_SIGNUP_GRANT = 50;
+const ZAP_CREDIT_SIGNUP_GRANT = 10;
 
 module.exports = {
   DB_PATHS,

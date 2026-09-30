@@ -315,6 +315,8 @@ const getOrderStatus = async (req, res) => {
   }
 };
 
+const activePublicVerifications = new Set();
+
 const getPublicOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -325,10 +327,11 @@ const getPublicOrderStatus = async (req, res) => {
       const now = Date.now();
       const lastCheck = payment.lastImapCheck || 0;
       
-      if (now - lastCheck > 15000) {
-        await ref(`${DB_PATHS.PAYMENTS}/${orderId}`).update({ lastImapCheck: now });
-        
+      if (now - lastCheck > 3500 && !activePublicVerifications.has(orderId)) {
+        activePublicVerifications.add(orderId);
         try {
+          await ref(`${DB_PATHS.PAYMENTS}/${orderId}`).update({ lastImapCheck: now });
+          
           // Dispatch to the right verifier for how this order was routed —
           // a Paytm-routed order (has its own paytmTxnRef) is checked
           // against Paytm's own order-status API; everything else falls
@@ -341,6 +344,8 @@ const getPublicOrderStatus = async (req, res) => {
           }
         } catch (verifyErr) {
           logger.warn(`Auto-verify trigger warning for ${orderId}:`, verifyErr.message);
+        } finally {
+          activePublicVerifications.delete(orderId);
         }
         
         const updatedPayment = await firebaseService.getPayment(orderId);
@@ -424,14 +429,26 @@ const verifyUtr = async (req, res) => {
       return response.error(res, 'Order ID and UTR/Txn ID are required', 400);
     }
 
-    const payment = await firebaseService.getPayment(orderId);
+    let targetOrderId = orderId.trim();
+    let payment = await firebaseService.getPayment(targetOrderId);
+    if (!payment) {
+      if (targetOrderId.startsWith('ZPP') || targetOrderId.startsWith('zpp')) {
+        const altId = targetOrderId.substring(3);
+        const altPay = await firebaseService.getPayment(altId);
+        if (altPay) { targetOrderId = altId; payment = altPay; }
+      } else {
+        const altId = 'ZPP' + targetOrderId;
+        const altPay = await firebaseService.getPayment(altId);
+        if (altPay) { targetOrderId = altId; payment = altPay; }
+      }
+    }
     if (!payment) return response.notFound(res, 'Order not found');
 
-    if (payment.status === 'success') {
-      return response.success(res, 'Order is already verified', { order_id: orderId, status: 'success', utr: payment.utr });
+    if (payment.status?.toLowerCase() === 'success') {
+      return response.success(res, 'Order is already verified', { order_id: targetOrderId, status: 'success', utr: payment.utr });
     }
 
-    await ref(`${DB_PATHS.PAYMENTS}/${orderId}`).update({ 
+    await ref(`${DB_PATHS.PAYMENTS}/${targetOrderId}`).update({ 
       utr: utr, 
       status: 'success',
       updatedAt: Date.now()

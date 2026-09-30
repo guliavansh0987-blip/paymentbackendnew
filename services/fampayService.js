@@ -42,15 +42,15 @@ const verifyPayment = async (orderId) => {
 
     let transactions = [];
     try {
-      transactions = await fetchGmailTransactions(user.fampay.email, rawPassword, 15);
+      transactions = await fetchGmailTransactions(user.fampay.email, rawPassword, 5);
     } catch (imapErr) {
       logger.warn(`Direct IMAP failed in verifyPayment, trying HTTP fallback: ${imapErr.message}`);
       try {
         const response = await axios.post(HISTORY_API_URL, {
           email: user.fampay.email,
           pass: rawPassword,
-          limit: 15
-        }, { httpsAgent, timeout: 15000 });
+          limit: 5
+        }, { httpsAgent, timeout: 8000 });
         if (response.data && response.data.status) {
           transactions = response.data.data || [];
         }
@@ -68,8 +68,9 @@ const verifyPayment = async (orderId) => {
       const txnTime = parseTxnDatetime(txn.datetime);
       if (txnTime === null || txnAmount !== paymentAmount) continue;
 
-      // 1. Timing: transaction must occur AFTER the order was created
-      const CLOCK_SKEW_BUFFER_MS = 5000;
+      // 1. Timing: transaction must occur around or after the order was created
+      // 3 minutes (180s) buffer handles minute-precision timestamps in emails & network skew
+      const CLOCK_SKEW_BUFFER_MS = 180000;
       if (txnTime < orderCreatedAt - CLOCK_SKEW_BUFFER_MS) continue;
 
       // 2. Claim check: neither UTR nor txnId can already belong to a DIFFERENT order
@@ -82,21 +83,64 @@ const verifyPayment = async (orderId) => {
         if (existingTxn && existingTxn.orderId !== orderId) continue;
       }
 
-      // 3. Mandatory Order ID check:
-      // The UPI QR code sets tn=ZPP<orderId>. The transaction note / purpose / raw text
-      // must contain this distinct order ID. If it does not contain the order ID, it must wait!
+      // 3. Order ID / Correlation check:
+      // Primary: The UPI QR code sets tn=ZPP<orderId>. Check if note/purpose/raw text contains it.
+      const cleanOrderId = orderId.replace(/^zpp/i, '').toLowerCase();
       const targetOrderId = orderId.toLowerCase();
-      const zppTarget = `zpp${targetOrderId}`;
+      const zppTarget = `zpp${cleanOrderId}`;
 
       const purposeStr = String(txn.purpose || '').toLowerCase();
       const rawStr = String(txn.rawText || txn.raw_text || '').toLowerCase();
 
-      const hasOrderId = (txn.purpose && txn.purpose !== 'NA' && (purposeStr.includes(targetOrderId) || purposeStr.includes(zppTarget))) ||
+      let hasOrderId = (txn.purpose && txn.purpose !== 'NA' && (
+                           purposeStr.includes(targetOrderId) || 
+                           purposeStr.includes(cleanOrderId) || 
+                           purposeStr.includes(zppTarget)
+                         )) ||
                          rawStr.includes(targetOrderId) ||
+                         rawStr.includes(cleanOrderId) ||
                          rawStr.includes(zppTarget);
 
-      if (!hasOrderId) {
-        // Without this visitor's distinct order ID, do not confirm; wait for the actual payment!
+      let isMatch = hasOrderId;
+
+      // Fallback: If customer's UPI app (GPay/PhonePe/Paytm) stripped or omitted the tn note,
+      // verify if there are no other pending orders with this exact amount for this merchant in the window.
+      if (!isMatch) {
+        try {
+          const pendingSnap = await ref(DB_PATHS.PAYMENTS)
+            .orderByChild('userId')
+            .equalTo(payment.userId)
+            .once('value');
+
+          let competingCount = 0;
+          if (pendingSnap.exists()) {
+            pendingSnap.forEach((child) => {
+              const other = child.val();
+              if (
+                child.key !== orderId &&
+                other.status === 'pending' &&
+                parseFloat(other.amount) === paymentAmount
+              ) {
+                const otherCreated = typeof other.createdAt === 'number'
+                  ? other.createdAt
+                  : Date.parse(other.createdAt) || 0;
+                if (Math.abs(otherCreated - orderCreatedAt) < 600000) {
+                  competingCount++;
+                }
+              }
+            });
+          }
+
+          if (competingCount === 0) {
+            isMatch = true;
+            logger.info(`FamPay auto-match via sole-order correlation for ${orderId} (₹${paymentAmount})`);
+          }
+        } catch (compErr) {
+          logger.warn(`Competing order check warning for ${orderId}: ${compErr.message}`);
+        }
+      }
+
+      if (!isMatch) {
         continue;
       }
 
@@ -104,8 +148,8 @@ const verifyPayment = async (orderId) => {
 
         await ref(`${DB_PATHS.PAYMENTS}/${orderId}`).update({
           status: 'success',
-          utr: txn.utr,
-          txnId: txn.txn_id || txn.utr,
+          utr: txn.utr !== 'NA' ? txn.utr : (txn.txn_id || orderId),
+          txnId: txn.txn_id !== 'NA' ? txn.txn_id : (txn.utr || orderId),
           updatedAt: Date.now()
         });
 
@@ -245,20 +289,46 @@ async function checkUtrForOrder(orderId, identifier) {
     const paymentAmount = parseFloat(payment.amount);
     const orderCreatedAt = typeof payment.createdAt === 'number' ? payment.createdAt : Date.parse(payment.createdAt) || 0;
     const identifierTrimmed = identifier.trim();
+    const identifierUpper = identifierTrimmed.toUpperCase();
+
+    const cleanOrderId = orderId.replace(/^zpp/i, '').toLowerCase();
+    const targetOrderId = orderId.toLowerCase();
+    const zppTarget = `zpp${cleanOrderId}`;
+
+    const CLOCK_SKEW_BUFFER_MS = 180000; // 3 minutes buffer
 
     for (const txn of transactions) {
       const txnAmount = parseFloat(txn.amount);
       const txnTime = parseTxnDatetime(txn.datetime);
-      
-      const utrMatch = (txn.utr === identifierTrimmed);
-      const txnIdMatch = (txn.txn_id === identifierTrimmed);
-      
-      // The identifier itself (a specific UTR/txn id the user typed) is
-      // already a strong signal here, unlike the amount-only case in
-      // verifyPayment — but keep the same forward-only time check for
-      // consistency, and the same "not already claimed" dedup guard.
-      const CLOCK_SKEW_BUFFER_MS = 5000;
-      if ((utrMatch || txnIdMatch) && txnTime !== null && txnTime >= orderCreatedAt - CLOCK_SKEW_BUFFER_MS && txnAmount === paymentAmount) {
+      if (txnTime === null || txnAmount !== paymentAmount) continue;
+      if (txnTime < orderCreatedAt - CLOCK_SKEW_BUFFER_MS) continue;
+
+      const purposeStr = String(txn.purpose || '').toLowerCase();
+      const rawStr = String(txn.rawText || txn.raw_text || '').toLowerCase();
+
+      // Check if this transaction has the Order ID from the QR transaction note
+      const hasOrderId = (txn.purpose && txn.purpose !== 'NA' && (
+                           purposeStr.includes(targetOrderId) || 
+                           purposeStr.includes(cleanOrderId) || 
+                           purposeStr.includes(zppTarget)
+                         )) ||
+                         rawStr.includes(targetOrderId) ||
+                         rawStr.includes(cleanOrderId) ||
+                         rawStr.includes(zppTarget);
+
+      // Check if UTR / Txn ID matches what user entered
+      const utrMatch = txn.utr && txn.utr !== 'NA' && (
+        txn.utr.toUpperCase() === identifierUpper ||
+        txn.utr.replace(/\D/g, '') === identifierTrimmed.replace(/\D/g, '')
+      );
+      const txnIdMatch = txn.txn_id && txn.txn_id !== 'NA' && (
+        txn.txn_id.toUpperCase() === identifierUpper ||
+        txn.txn_id.toUpperCase().includes(identifierUpper) ||
+        identifierUpper.includes(txn.txn_id.toUpperCase())
+      );
+      const rawTextMatch = rawStr.includes(identifierTrimmed.toLowerCase());
+
+      if (hasOrderId || utrMatch || txnIdMatch || rawTextMatch) {
         if (txn.utr && txn.utr !== 'NA') {
           const existingUtrCheck = await firebaseService.getPaymentByUtr(txn.utr);
           if (existingUtrCheck && existingUtrCheck.orderId !== orderId) continue;

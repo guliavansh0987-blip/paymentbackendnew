@@ -10,25 +10,8 @@ router.post('/logout', authenticate, logout);
 
 module.exports = router;
 
-// POST /api/auth/create-admin
-router.post('/create-admin', authLimiter, async (req, res) => {
-  const { idToken, secret } = req.body;
-  if (!idToken || !secret) return res.status(400).json({ success:false, message:'idToken and secret required' });
-  if (secret !== process.env.ADMIN_SECRET) return res.status(403).json({ success:false, message:'Invalid secret key' });
-
-  const { getAuth, ref } = require('../firebase/admin');
-  const firebaseService  = require('../services/firebaseService');
-  const jwt = require('jsonwebtoken');
-  try {
-    const decoded = await getAuth().verifyIdToken(idToken);
-    const { uid, email, name, picture } = decoded;
-    await firebaseService.upsertUser(uid, { email, displayName: name || email, photoURL: picture || '' });
-    await ref(`users/${uid}/role`).set('admin');
-    const user  = await firebaseService.getUser(uid);
-    const jwtSecret = process.env.JWT_SECRET || 'f3004e6ba9c75fd19ab0e5d6023751ce0aaef68208e3c79ed6e9fc4888788949';
-    const token = jwt.sign({ uid, email, role:'admin' }, jwtSecret, { expiresIn:'30d' });
-    return res.json({ success:true, message:'Admin created', data:{ token, user:{ ...user, role:'admin' } } });
-  } catch(err) {
-    return res.status(400).json({ success:false, message: err.message });
-  }
+// POST /api/auth/create-admin - PERMANENTLY DISABLED: Admin creation through this endpoint is removed. Only existing admins can log in.
+router.post('/create-admin', (req, res) => {
+  return res.status(403).json({ success: false, message: 'Admin creation is disabled. Only existing admin accounts can log in.' });
 });
+

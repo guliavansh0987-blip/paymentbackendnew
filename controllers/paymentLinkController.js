@@ -170,13 +170,45 @@ const getLinkPublic = async (req, res) => {
     const merchant = await firebaseService.getUser(link.userId);
     if (!merchant || merchant.isBanned) return response.error(res, 'This payment link is no longer available.');
 
+    const isFamPay = !!merchant.fampay?.isConnected;
+    const isPaytm = !!merchant.paytm?.isConnected;
+
+    let activeUpiId = null;
+    let activeGateway = 'wallet';
+    if (merchant.apiRoutingEngine === 'paytm_cashier' && isPaytm) {
+      activeGateway = 'paytm';
+      activeUpiId = merchant.paytm?.upiId;
+    } else if (merchant.apiRoutingEngine === 'cashier' && isFamPay) {
+      activeGateway = 'fampay';
+      activeUpiId = merchant.fampay?.upiId;
+    } else if (isPaytm) {
+      activeGateway = 'paytm';
+      activeUpiId = merchant.paytm?.upiId;
+    } else if (isFamPay) {
+      activeGateway = 'fampay';
+      activeUpiId = merchant.fampay?.upiId;
+    }
+
     return response.success(res, 'Link details fetched', {
-      linkId: link.id, merchantName: link.merchantName, title: link.title, description: link.description,
-      amount: link.amount, expiresAt: link.expiresAt, status: link.status, redirectUrl: link.redirectUrl || '',
-      checkoutTheme: merchant.checkoutTheme || 'default', checkoutThemeColor: merchant.checkoutThemeColor || '',
+      linkId: link.id,
+      merchantName: link.merchantName || merchant.businessName || merchant.name || 'Merchant',
+      title: link.title,
+      description: link.description,
+      amount: link.amount,
+      expiresAt: link.expiresAt,
+      status: link.status,
+      redirectUrl: link.redirectUrl || '',
+      checkoutTheme: merchant.checkoutTheme || 'default',
+      checkoutThemeColor: merchant.checkoutThemeColor || '',
       merchantPhoto: merchant.photoURL || null,
-      fampayConnected: !!merchant.fampay?.isConnected, fampayUpiId: merchant.fampay?.isConnected ? merchant.fampay.upiId : null,
-      routingEngine: link.routingEngine || 'wallet',
+      fampayConnected: isFamPay,
+      fampayUpiId: isFamPay ? merchant.fampay.upiId : null,
+      paytmConnected: isPaytm,
+      paytmUpiId: isPaytm ? merchant.paytm.upiId : null,
+      activeGateway,
+      activeUpiId,
+      upiId: activeUpiId,
+      routingEngine: merchant.apiRoutingEngine || link.routingEngine || 'wallet',
     });
   } catch (err) {
     logger.error('Get link public error:', err.message);
@@ -220,10 +252,6 @@ const initiatePayment = async (req, res) => {
     }
 
     // ─── Zap Credit gate ─────────────────────────────────────────
-    // Every completed order costs the merchant commissionPercent% of the
-    // order amount in Zap Credit. If they don't have enough to cover it,
-    // don't let the customer land on a checkout page at all — fail here,
-    // before any order record or payment URL is created.
     const commissionPercent = merchantSub.plan.commissionPercent ?? 5;
     const creditCheck = await walletService.checkSufficientCreditForOrder(link.userId, link.amount, commissionPercent);
     if (!creditCheck.ok) {
@@ -235,31 +263,51 @@ const initiatePayment = async (req, res) => {
     if (settings.maintenanceMode) return response.error(res, 'Payment system under maintenance.', 503);
 
     const merchantUser = await firebaseService.getUser(link.userId);
-    const isFamPay = merchantUser?.fampay?.isConnected;
-    const isPaytm = merchantUser?.paytm?.isConnected;
+    const isFamPay = !!merchantUser?.fampay?.isConnected;
+    const isPaytm = !!merchantUser?.paytm?.isConnected;
 
-    // Hide Wallet System backstop: covers a link created before the toggle
-    // was turned on, or before the merchant's cashier got disconnected
-    // afterward. createPaymentLink already refuses to make NEW links
-    // without a connected cashier once this is on, but an existing link
-    // could still be sitting out there — this is what actually stops a
-    // customer from reaching checkout on one of those.
     const hasCashierNow =
       (merchantUser?.apiRoutingEngine === 'cashier' && isFamPay) ||
-      (merchantUser?.apiRoutingEngine === 'paytm_cashier' && isPaytm);
+      (merchantUser?.apiRoutingEngine === 'paytm_cashier' && isPaytm) ||
+      isFamPay || isPaytm;
     if (settings.hideWalletSystemEnabled && !hasCashierNow) {
       return response.error(res, 'This merchant has not connected their own cashier to receive money. Payments cannot be accepted on this link right now.', 403);
     }
 
-    // Routing is decided live, from the merchant's account-wide setting
-    // (Developer Portal → Payment Routing), never from anything stored on
-    // the link itself — a link created weeks ago must immediately reflect
-    // a routing change made today. 'cashier' is only honored if FamPay is
-    // ACTUALLY connected right now; if the merchant switched the setting
-    // to cashier earlier but has since disconnected FamPay (or never
-    // connected it), this safely falls through to the normal wallet flow
-    // below instead of building a checkout with no UPI ID to pay to.
-    const useCashier = merchantUser?.apiRoutingEngine === 'cashier' && isFamPay;
+    // Intelligently route to merchant's connected cashier:
+    // If merchant explicitly selected paytm_cashier or has Paytm connected (and not exclusively routed to fampay)
+    const usePaytmCashier = (merchantUser?.apiRoutingEngine === 'paytm_cashier' && isPaytm) ||
+                            (isPaytm && (!isFamPay || merchantUser?.apiRoutingEngine !== 'cashier'));
+    // If merchant explicitly selected cashier or has FamPay connected
+    const useCashier = !usePaytmCashier && (
+                         (merchantUser?.apiRoutingEngine === 'cashier' && isFamPay) || isFamPay
+                       );
+
+    if (usePaytmCashier) {
+      const paytmTxnRef = 'PTM' + Date.now() + Math.random().toString(36).slice(2, 8).toUpperCase();
+      await firebaseService.createPayment(orderId, {
+        userId: link.userId, amount: link.amount, remark: `${link.title} | LinkID:${linkId}`, customerMobile: customerMobile || '', linkId,
+        paymentMethod: 'paytm', cashierUpiId: merchantUser.paytm.upiId, routingEngine: 'paytm_cashier', commissionPercent,
+        paytmTxnRef,
+      });
+      await ref(`${DB_PATHS.PAYMENT_LINKS}/${linkId}`).update({ lastOrderId: orderId, lastCustomerName: customerName || '', lastCustomerMobile: customerMobile || '' });
+      const safeRedirect = link.redirectUrl || `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=success`;
+      let checkoutUrl = `https://zetpay.online/checkout.html?order_id=${orderId}&amount=${link.amount}&upi=${encodeURIComponent(merchantUser.paytm.upiId)}&method=paytm&txn_ref=${encodeURIComponent(paytmTxnRef)}&redirect_url=${encodeURIComponent(safeRedirect)}`;
+      checkoutUrl += `&theme=${encodeURIComponent(merchantUser?.checkoutTheme || 'default')}`;
+      if (merchantUser?.checkoutThemeColor) checkoutUrl += `&color=${encodeURIComponent(merchantUser.checkoutThemeColor)}`;
+      return response.success(res, 'Payment initiated via Paytm Cashier', {
+        paymentUrl: checkoutUrl,
+        orderId,
+        amount: link.amount,
+        isTest: false,
+        method: 'paytm_cashier',
+        upiId: merchantUser.paytm.upiId,
+        txnRef: paytmTxnRef,
+        upiNote: paytmTxnRef,
+        merchantName: link.merchantName || merchantUser?.businessName || merchantUser?.name || 'Merchant',
+        merchantPhoto: merchantUser?.photoURL || null,
+      });
+    }
 
     if (useCashier) {
       await firebaseService.createPayment(orderId, {
@@ -267,17 +315,6 @@ const initiatePayment = async (req, res) => {
         paymentMethod: 'fampay', cashierUpiId: merchantUser.fampay.upiId, routingEngine: 'cashier', commissionPercent
       });
       await ref(`${DB_PATHS.PAYMENT_LINKS}/${linkId}`).update({ lastOrderId: orderId, lastCustomerName: customerName || '', lastCustomerMobile: customerMobile || '' });
-      // Was: redirect_url only got appended when link.redirectUrl was set,
-      // with no fallback — unlike the system_cashier branch below, which
-      // always builds a safeRedirect. Since checkout.html is a full-page
-      // navigation (not an iframe — window.location.href, not
-      // ZapUPI.loadPayment), its own inIframe check is always false, so it
-      // never posts back to a parent. Its ONLY way home is the redirect_url
-      // param; missing that, it fell to document.referrer (unreliable across
-      // WebViews/app browsers) or '/' — landing on the site root instead of
-      // link.html, which is why the customer never saw their payment record.
-      // Mirrors system_cashier's own default exactly, so both routes behave
-      // the same when the merchant hasn't set a custom redirectUrl.
       const safeRedirect = link.redirectUrl || `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=success`;
       let checkoutUrl = `https://zetpay.online/checkout.html?order_id=${orderId}&amount=${link.amount}&upi=${encodeURIComponent(merchantUser.fampay.upiId)}&redirect_url=${encodeURIComponent(safeRedirect)}`;
       checkoutUrl += `&theme=${encodeURIComponent(merchantUser?.checkoutTheme || 'default')}`;
@@ -289,7 +326,9 @@ const initiatePayment = async (req, res) => {
         isTest: false,
         method: 'cashier',
         upiId: merchantUser.fampay.upiId,
-        merchantName: link.merchantName,
+        upiNote: orderId.startsWith('ZPP') ? orderId : `ZPP${orderId}`,
+        merchantName: link.merchantName || merchantUser?.businessName || merchantUser?.name || 'Merchant',
+        merchantPhoto: merchantUser?.photoURL || null,
       });
     }
 
@@ -323,20 +362,11 @@ const initiatePayment = async (req, res) => {
         isTest: false,
         method: 'system_cashier',
         upiId: sysAdminUser.fampay.upiId,
-        merchantName: link.merchantName,
+        upiNote: orderId.startsWith('ZPP') ? orderId : `ZPP${orderId}`,
+        merchantName: link.merchantName || merchantUser?.businessName || merchantUser?.name || 'Merchant',
+        merchantPhoto: merchantUser?.photoURL || null,
       });
     } else {
-      // NOTE: previously there was an `else if (isFamPay)` branch here that
-      // forced ANY merchant with FamPay connected through the cashier
-      // checkout flow — even when their apiRoutingEngine was explicitly set
-      // to 'wallet'. That silently broke "switch back to wallet routing"
-      // (payments kept going through FamPay/checkout.html, and correctly-
-      // routed wallet payments never got their commission-adjusted amount
-      // credited via the normal handleLinkPayment path) and has been
-      // removed. FamPay-connected merchants who are actually routed to
-      // 'cashier' were already returned via the useCashier branch above —
-      // reaching this point means the account is genuinely on wallet/ZapUPI
-      // routing, so it must always go through the real ZapUPI order flow.
       const zapOrder = await zapService.createOrder({
         orderId, amount: String(link.amount.toFixed(2)), customerMobile: customerMobile || '', remark: link.title, omitRedirectUrls: !!useEmbedded,
         ...(useEmbedded ? {} : {
@@ -351,8 +381,10 @@ const initiatePayment = async (req, res) => {
         amount: link.amount,
         isTest: false,
         method: 'zapupi',
-        upiId: merchantUser?.fampay?.isConnected ? merchantUser.fampay.upiId : null,
-        merchantName: link.merchantName,
+        upiId: isPaytm ? merchantUser.paytm?.upiId : (isFamPay ? merchantUser.fampay?.upiId : null),
+        upiNote: orderId.startsWith('ZPP') ? orderId : `ZPP${orderId}`,
+        merchantName: link.merchantName || merchantUser?.businessName || merchantUser?.name || 'Merchant',
+        merchantPhoto: merchantUser?.photoURL || null,
       });
     }
   } catch (err) {
@@ -361,27 +393,171 @@ const initiatePayment = async (req, res) => {
   }
 };
 
-const getLinkOrderStatus = async (req, res) => {
+const quickInitiatePayment = async (req, res) => {
   try {
-    const { orderId } = req.params;
-    const payment = await firebaseService.getPayment(orderId);
-    // Serves any cashier-routed order checkout.html might poll: payment
-    // links (linkId), store products (storeId), and direct ZapAPI orders
-    // (type: 'api', no linkId/storeId of their own) — checkout.html polls
-    // this same endpoint regardless of which of these created the order.
-    if (!payment) return response.notFound(res, 'Order not found');
+    const { amount, merchantName, cashierUpiId, merchantUid } = req.body;
+    const parsedAmount = parseFloat(amount || 1.0);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return response.error(res, 'Invalid amount');
+    }
 
-    if (payment.status === 'pending' && (payment.paymentMethod === 'fampay' || payment.routingEngine === 'cashier' || payment.routingEngine === 'system_cashier' || payment.routingEngine === 'wallet')) {
-      const fampayService = require('../services/fampayService');
-      await fampayService.verifyPayment(orderId);
-      const updatedPayment = await firebaseService.getPayment(orderId);
-      if (updatedPayment) {
-        payment.status = updatedPayment.status;
-        payment.utr = updatedPayment.utr || updatedPayment.txnId;
+    let targetUid = merchantUid || null;
+    let merchantUser = null;
+
+    if (targetUid) {
+      merchantUser = await firebaseService.getUser(targetUid);
+    }
+
+    if (!merchantUser && req.headers.authorization) {
+      try {
+        const token = req.headers.authorization.replace(/^Bearer\s+/i, '').trim();
+        const jwt = require('jsonwebtoken');
+        const decoded = jwt.decode(token);
+        if (decoded && decoded.uid) {
+          targetUid = decoded.uid;
+          merchantUser = await firebaseService.getUser(targetUid);
+        }
+      } catch (e) {}
+    }
+
+    if (!merchantUser && cashierUpiId) {
+      const cleanUpi = cashierUpiId.trim().toLowerCase();
+      const usersSnap = await ref(DB_PATHS.USERS).once('value');
+      if (usersSnap.exists()) {
+        usersSnap.forEach((child) => {
+          const u = child.val();
+          if (
+            (u.fampay?.upiId && u.fampay.upiId.toLowerCase() === cleanUpi) ||
+            (u.paytm?.upiId && u.paytm.upiId.toLowerCase() === cleanUpi)
+          ) {
+            targetUid = child.key;
+            merchantUser = u;
+          }
+        });
       }
     }
 
-    return response.success(res, 'Status fetched', { orderId, status: payment.status, linkId: payment.linkId || null, utr: payment.utr || null });
+    if (!merchantUser) {
+      targetUid = 'iQ4q7MBkjjV9GoZmihEOi4wSxNo2';
+      merchantUser = await firebaseService.getUser(targetUid);
+    }
+
+    const isFamPay = !!merchantUser?.fampay?.isConnected;
+    const isPaytm = !!merchantUser?.paytm?.isConnected;
+
+    const usePaytmCashier = (merchantUser?.apiRoutingEngine === 'paytm_cashier' && isPaytm) ||
+                            (isPaytm && (!isFamPay || merchantUser?.apiRoutingEngine !== 'cashier'));
+
+    const orderId = zapService.generateOrderId(targetUid || 'merchant');
+    const resolvedMerchantName = merchantName || merchantUser?.businessName || merchantUser?.name || 'Merchant';
+    const resolvedPhoto = merchantUser?.photoURL || null;
+
+    if (usePaytmCashier) {
+      const paytmTxnRef = 'PTM' + Date.now() + Math.random().toString(36).slice(2, 8).toUpperCase();
+      const upiId = merchantUser.paytm.upiId;
+      await firebaseService.createPayment(orderId, {
+        userId: targetUid,
+        amount: parsedAmount,
+        remark: `Quick Payment | ${resolvedMerchantName}`,
+        paymentMethod: 'paytm',
+        cashierUpiId: upiId,
+        routingEngine: 'paytm_cashier',
+        commissionPercent: 5,
+        paytmTxnRef,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+
+      return response.success(res, 'Quick payment initiated (Paytm)', {
+        orderId,
+        amount: parsedAmount,
+        upiId,
+        txnRef: paytmTxnRef,
+        upiNote: paytmTxnRef,
+        method: 'paytm_cashier',
+        merchantName: resolvedMerchantName,
+        merchantPhoto: resolvedPhoto
+      });
+    }
+
+    const upiId = cashierUpiId || merchantUser?.fampay?.upiId || 'guliavansh@fam';
+    const upiNote = orderId.startsWith('ZPP') ? orderId : `ZPP${orderId}`;
+
+    await firebaseService.createPayment(orderId, {
+      userId: targetUid,
+      amount: parsedAmount,
+      remark: `Quick Payment | ${resolvedMerchantName}`,
+      paymentMethod: 'fampay',
+      cashierUpiId: upiId,
+      routingEngine: 'cashier',
+      commissionPercent: 5,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+
+    return response.success(res, 'Quick payment initiated (FamPay)', {
+      orderId,
+      amount: parsedAmount,
+      upiId,
+      upiNote,
+      method: 'cashier',
+      merchantName: resolvedMerchantName,
+      merchantPhoto: resolvedPhoto
+    });
+  } catch (err) {
+    logger.error('Quick initiate payment error:', err.message);
+    return response.serverError(res, err.message);
+  }
+};
+
+const activeLinkVerifications = new Set();
+
+const getLinkOrderStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    let targetOrderId = orderId.trim();
+    let payment = await firebaseService.getPayment(targetOrderId);
+    if (!payment) {
+      if (targetOrderId.startsWith('ZPP') || targetOrderId.startsWith('zpp')) {
+        const altId = targetOrderId.substring(3);
+        const altPay = await firebaseService.getPayment(altId);
+        if (altPay) { targetOrderId = altId; payment = altPay; }
+      } else {
+        const altId = 'ZPP' + targetOrderId;
+        const altPay = await firebaseService.getPayment(altId);
+        if (altPay) { targetOrderId = altId; payment = altPay; }
+      }
+    }
+    if (!payment) return response.notFound(res, 'Order not found');
+
+    if (payment.status === 'pending' && (payment.paymentMethod === 'fampay' || payment.routingEngine === 'cashier' || payment.routingEngine === 'system_cashier' || payment.routingEngine === 'wallet' || payment.routingEngine === 'paytm_cashier')) {
+      const now = Date.now();
+      const lastCheck = payment.lastImapCheck || 0;
+      if (now - lastCheck > 3500 && !activeLinkVerifications.has(targetOrderId)) {
+        activeLinkVerifications.add(targetOrderId);
+        try {
+          await ref(`${DB_PATHS.PAYMENTS}/${targetOrderId}`).update({ lastImapCheck: now });
+          if (payment.paytmTxnRef || payment.routingEngine === 'paytm_cashier') {
+            const paytmService = require('../services/paytmService');
+            await paytmService.verifyPayment(targetOrderId);
+          } else {
+            const fampayService = require('../services/fampayService');
+            await fampayService.verifyPayment(targetOrderId);
+          }
+        } catch (verifyErr) {
+          logger.warn(`Auto-verify trigger warning for link order ${targetOrderId}:`, verifyErr.message);
+        } finally {
+          activeLinkVerifications.delete(targetOrderId);
+        }
+        const updatedPayment = await firebaseService.getPayment(targetOrderId);
+        if (updatedPayment) {
+          payment.status = updatedPayment.status;
+          payment.utr = updatedPayment.utr || updatedPayment.txnId;
+        }
+      }
+    }
+
+    return response.success(res, 'Status fetched', { orderId: targetOrderId, status: payment.status, linkId: payment.linkId || null, utr: payment.utr || null });
   } catch (err) {
     logger.error('Get link order status error:', err.message);
     return response.serverError(res, err.message);
@@ -509,6 +685,7 @@ module.exports = {
   getLinkPublic,
   getLinkOrderStatus,
   initiatePayment,
+  quickInitiatePayment,
   disableLink,
   enableLink,
   editPaymentLink,
